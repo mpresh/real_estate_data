@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import sys
 import re
 import requests
+import collections
 
 #url_source = "http://maynard.patriotproperties.com/search-middle-ns.asp?SearchBuildingType=APRTMNT+CONV"
 #url_source = "http://maynard.patriotproperties.com/SearchResults.asp?SearchBuildingType=APRTMNT+CONV"
@@ -72,9 +73,51 @@ def get_summary_page_details(summary_url):
         cookies = obj.cookies
     #html = str(urllib.request.urlopen(summary_url).read()).lower()
 
-    print(html)
-    mo = re.findall("(<table.*?</table>)", html, flags=re.MULTILINE|re.DOTALL)
-    #print(mo)
+    tables = re.findall("(<table.*?</table>)", html, flags=re.MULTILINE|re.DOTALL)
+
+    summary_data = {}
+
+    # table 1
+    tds = re.findall("(<td.*?</td>)", tables[1], flags=re.MULTILINE|re.DOTALL)
+    summary_data["location"] = remove_tags(tds[0]).lower().replace("location", "").strip()
+    summary_data["property_account_number"] = remove_tags(tds[1]).lower().\
+        replace("property account number", "").strip()
+    summary_data["parcel_id"] = remove_tags(tds[2]).lower().replace("parcel id", "").strip()
+
+    # table 3
+    tds = re.findall("(<td.*?</td>)", tables[2], flags=re.MULTILINE | re.DOTALL)
+    summary_data["old_parcel_id"] = remove_tags(tds[0]).lower().replace("old parcel id", "").strip()
+    summary_data["owner"] = remove_tags(tds[3]).lower().replace("owner", "").strip()
+    summary_data["city"] = remove_tags(tds[5]).lower().strip()
+    summary_data["state"] = remove_tags(tds[9]).lower().strip()
+    summary_data["address"] = remove_tags(tds[11]).lower().strip()
+    summary_data["zipcode"] = remove_tags(tds[13]).lower().strip()
+    summary_data["zone"] = remove_tags(tds[17]).lower().strip()
+
+    # table 4
+    tds = re.findall("(<td.*?</td>)", tables[3], flags=re.MULTILINE | re.DOTALL)
+    summary_data["sale_date"] = remove_tags(tds[2]).lower().replace("sale date", "").strip()
+    summary_data["legal_reference"] = remove_tags(tds[4]).lower().replace("legal reference", "").strip()
+    summary_data["sale_price"] = remove_tags(tds[6]).lower().replace("sale price", "").strip()
+    summary_data["seller"] = remove_tags(tds[8]).lower().replace("Grantor(Seller)", "").strip()
+
+    # table 5
+    tds = re.findall("(<td.*?</td>)", tables[4], flags=re.MULTILINE | re.DOTALL)
+    summary_data["assessment_year"] = remove_tags(tds[5]).lower().replace("year", "").strip()
+    summary_data["assessment_building_value"] = remove_tags(tds[7]).lower().replace("building value", "").strip()
+    summary_data["assessment_xtra_features_value"] = remove_tags(tds[11]).lower().\
+        replace("xtra features value", "").strip()
+    summary_data["assessment_land_area"] = remove_tags(tds[13]).lower().replace("land area", "").strip()
+    summary_data["assessment_land_value"] = remove_tags(tds[15]).lower().replace("land value", "").strip()
+    summary_data["assessment_total_value"] = remove_tags(tds[19]).lower().replace("total value", "").strip()
+
+    summary_data["units"] = remove_tags(re.search("roof cover, with(.*?)unit", html,
+                                                  flags=re.MULTILINE | re.DOTALL).group(1))
+    summary_data["bedrooms"] = remove_tags(re.search("total room\(s\),(.*?)total bedroom\(s\),", html,
+                                                  flags=re.MULTILINE | re.DOTALL).group(1))
+    summary_data["bathroom"] = remove_tags(re.search("total bedroom\(s\),(.*?)total bath\(s\),", html,
+                                                     flags=re.MULTILINE | re.DOTALL).group(1))
+    return summary_data
 
 
 def get_data():
@@ -116,12 +159,13 @@ def parse_html_records_page(html):
         
         data["summary_url"] = get_summary_url(tds[0])
         summary_details = get_summary_page_details(data["summary_url"])
+        data.update(summary_details)
         data["parcel_id"] = remove_tags(tds[0])
         data["address"] = remove_tags(tds[1])
         data["owner"] = remove_tags(tds[2])
         built_type_list = remove_tags(tds[3].split("<br>"))
         data["built"] = built_type_list[0]
-        data["type"] = built_type_list[1:]
+        data["type"] = str(built_type_list[1:])
         data["total_value"] = remove_tags(tds[4])
         data["beds"], data["baths"] = remove_tags(tds[5].split("<br>"))
         data["lot_size"], data["finish_area"] = remove_tags(tds[6].split("<br>"))
@@ -135,10 +179,23 @@ def parse_html_records_page(html):
     
 def main():
     records = []
+    c = collections.Counter()
     for page in get_data():
         r = parse_html_records_page(page)
         records.extend(r)
+        for i in r:
+            c[i["units"]] += 1
         print("records = {}  total records = {}".format(len(r), len(records)))
+
+        print(c)
+
+    import csv
+    keys = records[0].keys()
+
+    with open('maynard_real_estate.csv', 'w') as output_file:
+        dict_writer = csv.DictWriter(output_file, fieldnames=keys)
+        dict_writer.writeheader()
+        dict_writer.writerows(records)
 
 
 if __name__ == "__main__":
